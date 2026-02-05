@@ -21,13 +21,15 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // Expose for use in non-module scripts (optional)
 if (typeof window !== "undefined") {
   window.firebaseApp = app;
   window.firebaseAnalytics = analytics;
   window.firebaseDb = db;
+  window.firebaseStorage = storage;
   window.dispatchEvent(new CustomEvent("firebaseReady"));
 }
 
-export { app, analytics, db };
+export { app, analytics, db, storage };

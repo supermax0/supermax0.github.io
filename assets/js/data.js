@@ -122,10 +122,12 @@ function _toFirestoreData(projectData) {
 
 /**
  * Add new project
+ * @param {Object} projectData
+ * @param {string} [customId] - معرف مخصص (للربط مع Storage)
  */
-function addProject(projectData) {
+function addProject(projectData, customId) {
     var newProject = {
-        id: generateId(),
+        id: customId || generateId(),
         name: projectData.name,
         description: projectData.description,
         url: projectData.url,
@@ -145,8 +147,13 @@ function addProject(projectData) {
         return (async function () {
             try {
                 var mod = await import("https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js");
-                var ref = await mod.addDoc(mod.collection(window.firebaseDb, FIRESTORE_COLLECTION), _toFirestoreData(newProject));
-                newProject.id = ref.id;
+                var data = _toFirestoreData(newProject);
+                if (customId) {
+                    await mod.setDoc(mod.doc(window.firebaseDb, FIRESTORE_COLLECTION, customId), data);
+                } else {
+                    var ref = await mod.addDoc(mod.collection(window.firebaseDb, FIRESTORE_COLLECTION), data);
+                    newProject.id = ref.id;
+                }
                 return newProject;
             } catch (e) {
                 console.error('Firestore add error:', e);

@@ -59,6 +59,10 @@
   2. من القائمة: Build → Firestore Database → Create database
   3. اختر وضع التطوير (للاختبار) أو الإنتاج وحدد قواعد الأمان
   4. المجموعة `projects` تُنشأ تلقائياً عند إضافة أول مشروع
+- **Firebase Storage** (لتخزين ملفات المشاريع المرفوعة):
+  1. من القائمة: Build → Storage → Get started
+  2. اختر قواعد الأمان (للاختبار: allow read, write)
+  3. الملفات تُخزن في المسار `project-files/{projectId}/{fileName}`
 - **API Key (OpenAI)**: اختياري – يُضبط من لوحة التحكم → الإعدادات لتفعيل الدردشة الذكية.
 
 ## الترخيص

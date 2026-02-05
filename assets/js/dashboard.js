@@ -511,45 +511,56 @@ async function handleAddProject(e) {
         return;
     }
     
-    // Handle file or URL
+    var projectIdForStorage = null;
     if (projectType === 'file') {
-        const fileInput = document.getElementById('projectFile');
+        var fileInput = document.getElementById('projectFile');
         if (!fileInput.files || fileInput.files.length === 0) {
             alert('يرجى اختيار ملفات المشروع');
             return;
         }
         
         try {
-            const files = Array.from(fileInput.files);
-            const filesData = {};
-            let mainHtmlFile = null;
-            
-            // Read all files
-            for (const file of files) {
-                const fileContent = await readFileAsBase64(file);
-                filesData[file.name] = {
-                    name: file.name,
-                    content: fileContent,
-                    type: file.type || getFileType(file.name),
-                    size: file.size
-                };
-                
-                // Find main HTML file
-                const fileName = file.name.toLowerCase();
-                if ((fileName.endsWith('.html') || fileName.endsWith('.htm')) && !mainHtmlFile) {
-                    mainHtmlFile = file.name;
-                }
+            var files = Array.from(fileInput.files);
+            var mainHtmlFile = null;
+            for (var f = 0; f < files.length; f++) {
+                var fn = files[f].name.toLowerCase();
+                if ((fn.endsWith('.html') || fn.endsWith('.htm')) && !mainHtmlFile) mainHtmlFile = files[f].name;
             }
-            
             if (!mainHtmlFile) {
                 alert('يجب أن يحتوي المشروع على ملف HTML على الأقل');
                 return;
             }
-            
-            formData.url = `projects/${mainHtmlFile}`;
+
+            var filesData = null;
+            projectIdForStorage = generateId();
+            if (typeof window.uploadProjectFilesToStorage === 'function' && window.firebaseStorage) {
+                try {
+                    filesData = await uploadProjectFilesToStorage(projectIdForStorage, files);
+                    if (filesData) {
+                        formData.files = filesData;
+                        formData.fileContent = null;
+                    }
+                } catch (err) {
+                    console.warn('Storage upload failed, using base64:', err);
+                }
+            }
+            if (!filesData) {
+                filesData = {};
+                for (var i = 0; i < files.length; i++) {
+                    var file = files[i];
+                    var content = await readFileAsBase64(file);
+                    filesData[file.name] = {
+                        name: file.name,
+                        content: content,
+                        type: file.type || getFileType(file.name),
+                        size: file.size
+                    };
+                }
+                formData.files = filesData;
+                formData.fileContent = filesData[mainHtmlFile].content;
+            }
+            formData.url = 'projects/' + mainHtmlFile;
             formData.fileName = mainHtmlFile;
-            formData.files = filesData; // Store all files
-            formData.fileContent = filesData[mainHtmlFile].content; // Keep for backward compatibility
         } catch (error) {
             alert('حدث خطأ أثناء قراءة الملفات');
             console.error(error);
@@ -572,8 +583,8 @@ async function handleAddProject(e) {
         }
     }
     
-    // Add project (async for Firestore)
-    const newProject = await addProject(formData);
+    var useStorageId = formData.files && formData.fileName && formData.files[formData.fileName] && formData.files[formData.fileName].url;
+    var newProject = await addProject(formData, useStorageId ? projectIdForStorage : null);
     
     if (newProject) {
         alert('تم إضافة المشروع بنجاح!');
@@ -619,38 +630,36 @@ async function handleEditProject(e) {
     if (projectType === 'file') {
         const fileInput = document.getElementById('editProjectFile');
         if (fileInput.files && fileInput.files.length > 0) {
-            // New files uploaded
             try {
-                const files = Array.from(fileInput.files);
-                const filesData = {};
-                let mainHtmlFile = null;
-                
-                // Read all files
-                for (const file of files) {
-                    const fileContent = await readFileAsBase64(file);
-                    filesData[file.name] = {
-                        name: file.name,
-                        content: fileContent,
-                        type: file.type || getFileType(file.name),
-                        size: file.size
-                    };
-                    
-                    // Find main HTML file
-                    const fileName = file.name.toLowerCase();
-                    if ((fileName.endsWith('.html') || fileName.endsWith('.htm')) && !mainHtmlFile) {
-                        mainHtmlFile = file.name;
-                    }
+                var editFiles = Array.from(fileInput.files);
+                var mainHtmlFile = null;
+                for (var ef = 0; ef < editFiles.length; ef++) {
+                    var efn = editFiles[ef].name.toLowerCase();
+                    if ((efn.endsWith('.html') || efn.endsWith('.htm')) && !mainHtmlFile) mainHtmlFile = editFiles[ef].name;
                 }
-                
                 if (!mainHtmlFile) {
                     alert('يجب أن يحتوي المشروع على ملف HTML على الأقل');
                     return;
                 }
-                
-                formData.url = `projects/${mainHtmlFile}`;
+                var editFilesData = null;
+                if (typeof window.uploadProjectFilesToStorage === 'function' && window.firebaseStorage) {
+                    try {
+                        editFilesData = await uploadProjectFilesToStorage(projectId, editFiles);
+                        if (editFilesData) formData.fileContent = null;
+                    } catch (err) { console.warn('Storage upload failed:', err); }
+                }
+                if (!editFilesData) {
+                    editFilesData = {};
+                    for (var ei = 0; ei < editFiles.length; ei++) {
+                        var f = editFiles[ei];
+                        var c = await readFileAsBase64(f);
+                        editFilesData[f.name] = { name: f.name, content: c, type: f.type || getFileType(f.name), size: f.size };
+                    }
+                    formData.fileContent = editFilesData[mainHtmlFile].content;
+                }
+                formData.url = 'projects/' + mainHtmlFile;
                 formData.fileName = mainHtmlFile;
-                formData.files = filesData;
-                formData.fileContent = filesData[mainHtmlFile].content; // Keep for backward compatibility
+                formData.files = editFilesData;
             } catch (error) {
                 alert('حدث خطأ أثناء قراءة الملفات');
                 console.error(error);

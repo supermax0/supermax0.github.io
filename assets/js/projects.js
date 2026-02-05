@@ -7,16 +7,13 @@
  * Open preview modal with iframe
  * فتح نافذة المعاينة مع iframe
  */
-function openPreview(url, project) {
-    const modal = document.getElementById('previewModal');
-    const iframe = document.getElementById('previewFrame');
+async function openPreview(url, project) {
+    var modal = document.getElementById('previewModal');
+    var iframe = document.getElementById('previewFrame');
     
     if (modal && iframe) {
-        // Check if it's a local file project
         if (project && project.projectType === 'file') {
-            // Merge all files (HTML, CSS, JS) into complete HTML
-            const mergedHTML = mergeProjectFiles(project);
-            
+            var mergedHTML = await mergeProjectFiles(project);
             if (mergedHTML) {
                 // Create blob with merged HTML content and proper encoding
                 const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
@@ -94,62 +91,61 @@ function base64ToText(base64) {
 }
 
 /**
- * Merge all project files into a complete HTML document
- * دمج جميع ملفات المشروع في مستند HTML كامل
+ * Get text from file (content base64 or url)
  */
-function mergeProjectFiles(project) {
+function getFileText(file) {
+    if (file.content) return Promise.resolve(base64ToText(file.content));
+    if (file.url) return fetch(file.url).then(function(r) { return r.text(); });
+    return Promise.resolve('');
+}
+
+/**
+ * Merge all project files into a complete HTML document
+ * دمج جميع ملفات المشروع في مستند HTML كامل (يدعم base64 و Firebase Storage URLs)
+ */
+async function mergeProjectFiles(project) {
     if (!project.files || Object.keys(project.files).length === 0) {
-        // Fallback to old format
-        if (project.fileContent) {
-            return base64ToText(project.fileContent);
-        }
+        if (project.fileContent) return base64ToText(project.fileContent);
         return null;
     }
     
-    const files = project.files;
-    let htmlContent = '';
-    let cssContent = '';
-    let jsContent = '';
-    let pyContent = '';
+    var files = project.files;
+    var htmlContent = '';
+    var cssContent = '';
+    var jsContent = '';
+    var pyContent = '';
     
-    // Find HTML file
-    const htmlFile = Object.values(files).find(file => {
-        const name = file.name.toLowerCase();
-        return name.endsWith('.html') || name.endsWith('.htm');
-    });
-    
-    if (!htmlFile) {
-        return null;
+    var htmlFile = null;
+    for (var k in files) {
+        var f = files[k];
+        var n = (f.name || k).toLowerCase();
+        if ((n.endsWith('.html') || n.endsWith('.htm')) && !htmlFile) htmlFile = f;
     }
+    if (!htmlFile) return null;
     
-    htmlContent = base64ToText(htmlFile.content);
+    htmlContent = await getFileText(htmlFile);
     
-    // Extract CSS files
-    Object.values(files).forEach(file => {
-        const name = file.name.toLowerCase();
+    for (var key in files) {
+        var file = files[key];
+        var name = (file.name || key).toLowerCase();
         if (name.endsWith('.css')) {
-            const cssText = base64ToText(file.content);
-            cssContent += `/* ${file.name} */\n${cssText}\n\n`;
+            cssContent += '/* ' + file.name + ' */\n' + (await getFileText(file)) + '\n\n';
         }
-    });
-    
-    // Extract JS files
-    Object.values(files).forEach(file => {
-        const name = file.name.toLowerCase();
-        if (name.endsWith('.js')) {
-            const jsText = base64ToText(file.content);
-            jsContent += `/* ${file.name} */\n${jsText}\n\n`;
+    }
+    for (var key2 in files) {
+        var file2 = files[key2];
+        var name2 = (file2.name || key2).toLowerCase();
+        if (name2.endsWith('.js')) {
+            jsContent += '/* ' + file2.name + ' */\n' + (await getFileText(file2)) + '\n\n';
         }
-    });
-    
-    // Extract Python files (for display purposes)
-    Object.values(files).forEach(file => {
-        const name = file.name.toLowerCase();
-        if (name.endsWith('.py')) {
-            const pyText = base64ToText(file.content);
-            pyContent += `# ${file.name}\n${pyText}\n\n`;
+    }
+    for (var key3 in files) {
+        var file3 = files[key3];
+        var name3 = (file3.name || key3).toLowerCase();
+        if (name3.endsWith('.py')) {
+            pyContent += '# ' + file3.name + '\n' + (await getFileText(file3)) + '\n\n';
         }
-    });
+    }
     
     // Parse HTML and inject CSS and JS
     let mergedHTML = htmlContent;
