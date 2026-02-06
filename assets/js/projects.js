@@ -12,34 +12,85 @@ async function openPreview(url, project) {
     var iframe = document.getElementById('previewFrame');
     
     if (modal && iframe) {
-        if (project && project.projectType === 'file') {
-            var mergedHTML = await mergeProjectFiles(project);
-            if (mergedHTML) {
-                // Create blob with merged HTML content and proper encoding
-                const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
-                const blobUrl = URL.createObjectURL(blob);
-                iframe.src = blobUrl;
-                
-                // Clean up blob URL when modal closes
-                modal.addEventListener('close', function cleanup() {
-                    URL.revokeObjectURL(blobUrl);
-                    modal.removeEventListener('close', cleanup);
-                }, { once: true });
+        try {
+            if (project && project.projectType === 'file') {
+                var mergedHTML = await mergeProjectFiles(project);
+                if (mergedHTML) {
+                    // Create blob with merged HTML content and proper encoding
+                    const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
+                    const blobUrl = URL.createObjectURL(blob);
+                    iframe.src = blobUrl;
+                    
+                    // Clean up blob URL when modal closes
+                    modal.addEventListener('close', function cleanup() {
+                        URL.revokeObjectURL(blobUrl);
+                        modal.removeEventListener('close', cleanup);
+                    }, { once: true });
+                } else {
+                    iframe.src = url;
+                }
             } else {
                 iframe.src = url;
             }
-        } else {
-            iframe.src = url;
+            
+            modal.classList.add('active');
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    closePreview();
+                }
+            });
+        } catch (error) {
+            console.error('Error opening preview:', error);
+            // Show error page in iframe
+            iframe.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(`
+                <!DOCTYPE html>
+                <html lang="ar" dir="rtl">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>خطأ في التحميل</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            min-height: 100vh;
+                            margin: 0;
+                            background: #1e293b;
+                            color: #fff;
+                            text-align: center;
+                            padding: 2rem;
+                        }
+                        .error-container {
+                            max-width: 500px;
+                        }
+                        h1 { color: #ef4444; }
+                        p { color: #94a3b8; line-height: 1.6; }
+                        code {
+                            background: rgba(239, 68, 68, 0.2);
+                            padding: 0.2rem 0.5rem;
+                            border-radius: 4px;
+                            font-size: 0.9em;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="error-container">
+                        <h1>⚠️ خطأ في تحميل المعاينة</h1>
+                        <p>حدث خطأ أثناء تحميل ملفات المشروع من Firebase Storage.</p>
+                        <p>السبب المحتمل: <code>مشكلة CORS</code></p>
+                        <p style="margin-top: 1rem; font-size: 0.9em;">
+                            راجع ملف <code>FIREBASE_CORS_SETUP.md</code> لإصلاح المشكلة.
+                        </p>
+                    </div>
+                </body>
+                </html>
+            `);
+            modal.classList.add('active');
         }
-        
-        modal.classList.add('active');
-        
-        // Close modal when clicking outside
-        modal.addEventListener('click', function(e) {
-            if (e.target === modal) {
-                closePreview();
-            }
-        });
     }
 }
 
@@ -92,10 +143,42 @@ function base64ToText(base64) {
 
 /**
  * Get text from file (content base64 or url)
+ * يحصل على النص من الملف (base64 أو رابط Firebase Storage)
  */
-function getFileText(file) {
-    if (file.content) return Promise.resolve(base64ToText(file.content));
-    if (file.url) return fetch(file.url).then(function(r) { return r.text(); });
+async function getFileText(file) {
+    // If file has base64 content, decode it
+    if (file.content) {
+        return Promise.resolve(base64ToText(file.content));
+    }
+    
+    // If file has URL, try to fetch it
+    if (file.url) {
+        try {
+            // Try fetching with CORS mode
+            const response = await fetch(file.url, {
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.text();
+        } catch (error) {
+            console.error('Failed to fetch file from URL:', file.url, error);
+            
+            // If it's a CORS error, show helpful message
+            if (error.message.includes('CORS') || error.name === 'TypeError') {
+                console.warn('CORS error detected. Please configure CORS in Firebase Storage console.');
+                console.warn('To fix: Go to Firebase Console > Storage > Rules and add CORS configuration');
+            }
+            
+            // Return error comment instead of crashing
+            return Promise.resolve('<!-- Error loading file: ' + (file.name || 'unknown') + ' - ' + error.message + ' -->');
+        }
+    }
+    
     return Promise.resolve('');
 }
 
@@ -311,31 +394,36 @@ function renderMarkdown(text) {
  * Handle project preview/open
  * التعامل مع معاينة/فتح المشروع
  */
-function handleProjectAction(project) {
+async function handleProjectAction(project) {
     if (project.displayType === 'preview') {
         openPreview(project.url, project);
     } else {
         // For file projects, create blob URL
         if (project.projectType === 'file') {
-            // Merge all files (HTML, CSS, JS) into complete HTML
-            const mergedHTML = mergeProjectFiles(project);
-            
-            if (mergedHTML) {
-                const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
-                const blobUrl = URL.createObjectURL(blob);
-                const newWindow = window.open(blobUrl, '_blank');
-                // Clean up blob URL after a delay
-                setTimeout(() => {
-                    if (newWindow) {
-                        newWindow.addEventListener('beforeunload', () => {
+            try {
+                // Merge all files (HTML, CSS, JS) into complete HTML
+                const mergedHTML = await mergeProjectFiles(project);
+                
+                if (mergedHTML) {
+                    const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
+                    const blobUrl = URL.createObjectURL(blob);
+                    const newWindow = window.open(blobUrl, '_blank');
+                    // Clean up blob URL after a delay
+                    setTimeout(() => {
+                        if (newWindow) {
+                            newWindow.addEventListener('beforeunload', () => {
+                                URL.revokeObjectURL(blobUrl);
+                            });
+                        } else {
                             URL.revokeObjectURL(blobUrl);
-                        });
-                    } else {
-                        URL.revokeObjectURL(blobUrl);
-                    }
-                }, 100);
-            } else {
-                window.open(project.url, '_blank');
+                        }
+                    }, 100);
+                } else {
+                    window.open(project.url, '_blank');
+                }
+            } catch (error) {
+                console.error('Error opening project:', error);
+                alert('حدث خطأ أثناء فتح المشروع. تحقق من الكونسول للتفاصيل.');
             }
         } else {
             window.open(project.url, '_blank');
@@ -347,7 +435,7 @@ function handleProjectAction(project) {
  * Create project card HTML
  * إنشاء HTML لبطاقة المشروع
  */
-function createProjectCard(project) {
+async function createProjectCard(project) {
     const card = document.createElement('div');
     card.className = 'project-card';
     
@@ -358,16 +446,75 @@ function createProjectCard(project) {
     // Create preview URL
     let previewUrl = project.url;
     let blobUrl = null;
+    let hasError = false;
+    
     if (project.projectType === 'file') {
-        // Merge all files (HTML, CSS, JS) into complete HTML
-        const mergedHTML = mergeProjectFiles(project);
-        
-        if (mergedHTML) {
-            const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
-            blobUrl = URL.createObjectURL(blob);
-            previewUrl = blobUrl;
-            // Store blob URL for cleanup
-            card.dataset.blobUrl = blobUrl;
+        try {
+            // Merge all files (HTML, CSS, JS) into complete HTML
+            const mergedHTML = await mergeProjectFiles(project);
+            
+            if (mergedHTML) {
+                // Check if HTML contains error comments
+                if (mergedHTML.includes('<!-- Error loading file:')) {
+                    hasError = true;
+                    console.warn('Some files failed to load for project:', project.name);
+                }
+                
+                const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
+                blobUrl = URL.createObjectURL(blob);
+                previewUrl = blobUrl;
+                // Store blob URL for cleanup
+                card.dataset.blobUrl = blobUrl;
+            }
+        } catch (error) {
+            console.error('Error merging project files:', error);
+            hasError = true;
+            // Show error message in preview
+            previewUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(`
+                <!DOCTYPE html>
+                <html lang="ar" dir="rtl">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>خطأ في التحميل</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            min-height: 100vh;
+                            margin: 0;
+                            background: #1e293b;
+                            color: #fff;
+                            text-align: center;
+                            padding: 2rem;
+                        }
+                        .error-container {
+                            max-width: 500px;
+                        }
+                        h1 { color: #ef4444; }
+                        p { color: #94a3b8; line-height: 1.6; }
+                        code {
+                            background: rgba(239, 68, 68, 0.2);
+                            padding: 0.2rem 0.5rem;
+                            border-radius: 4px;
+                            font-size: 0.9em;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="error-container">
+                        <h1>⚠️ خطأ في تحميل الملفات</h1>
+                        <p>حدث خطأ أثناء تحميل ملفات المشروع من Firebase Storage.</p>
+                        <p>السبب المحتمل: <code>مشكلة CORS</code></p>
+                        <p style="margin-top: 1rem; font-size: 0.9em;">
+                            راجع ملف <code>FIREBASE_CORS_SETUP.md</code> لإصلاح المشكلة.
+                        </p>
+                    </div>
+                </body>
+                </html>
+            `);
         }
     }
     
@@ -421,11 +568,11 @@ function createProjectCard(project) {
     
     const openBtn = card.querySelector('.project-open-btn');
     if (openBtn) {
-        openBtn.addEventListener('click', function() {
+        openBtn.addEventListener('click', async function() {
             // For file projects, create blob URL
             if (project.projectType === 'file') {
                 // Merge all files (HTML, CSS, JS) into complete HTML
-                const mergedHTML = mergeProjectFiles(project);
+                const mergedHTML = await mergeProjectFiles(project);
                 
                 if (mergedHTML) {
                     const blob = new Blob([mergedHTML], { type: 'text/html; charset=utf-8' });
@@ -494,7 +641,7 @@ function escapeHtml(text) {
  * Load and display all projects
  * تحميل وعرض جميع المشاريع
  */
-function loadAllProjects() {
+async function loadAllProjects() {
     const container = document.getElementById('projectsGrid');
     if (!container) return;
     
@@ -508,9 +655,10 @@ function loadAllProjects() {
         return;
     }
     
-    // Create cards for each project
-    projects.forEach(project => {
-        const card = createProjectCard(project);
+    // Create cards for each project (await all async operations)
+    const cardPromises = projects.map(project => createProjectCard(project));
+    const cards = await Promise.all(cardPromises);
+    cards.forEach(card => {
         container.appendChild(card);
     });
 }
@@ -519,7 +667,7 @@ function loadAllProjects() {
  * Load latest projects (for homepage)
  * تحميل آخر المشاريع (للصفحة الرئيسية)
  */
-function loadLatestProjects() {
+async function loadLatestProjects() {
     const container = document.getElementById('latestProjects');
     if (!container) return;
     
@@ -533,9 +681,10 @@ function loadLatestProjects() {
         return;
     }
     
-    // Create cards for each project
-    projects.forEach(project => {
-        const card = createProjectCard(project);
+    // Create cards for each project (await all async operations)
+    const cardPromises = projects.map(project => createProjectCard(project));
+    const cards = await Promise.all(cardPromises);
+    cards.forEach(card => {
         container.appendChild(card);
     });
 }
@@ -560,9 +709,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Reload projects when Firestore updates
-    window.addEventListener('projectsUpdated', function() {
-        loadAllProjects();
-        loadLatestProjects();
+    window.addEventListener('projectsUpdated', async function() {
+        await loadAllProjects();
+        await loadLatestProjects();
     });
 });
 
